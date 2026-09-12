@@ -1062,11 +1062,10 @@ fn powershell_agent_script(argv: &[String]) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ");
     Some(format!(
-        "if((Get-Command {} -ErrorAction SilentlyContinue).CommandType -eq 'ExternalScript'){{& {} {}}}else{{Start-Process -FilePath {} -ArgumentList {} -NoNewWindow -Wait}}",
+        "$__herdrAgentCommand=Get-Command {} -ErrorAction SilentlyContinue;if($null -eq $__herdrAgentCommand -or $__herdrAgentCommand.CommandType -ne 'Application'){{& {} {}}}else{{Start-Process -FilePath $__herdrAgentCommand.Source -ArgumentList {} -NoNewWindow -Wait}}",
         super::quote_powershell_arg(program),
         super::quote_powershell_arg(program),
         powershell_args,
-        super::quote_powershell_arg(program),
         super::quote_powershell_arg(&command_line),
     ))
 }
@@ -3510,7 +3509,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             String::from_utf16(&utf16).unwrap(),
-            "if((Get-Command pi -ErrorAction SilentlyContinue).CommandType -eq 'ExternalScript'){& pi '' 'two words' '100%' 'wow!' 'a''b' '--model'}else{Start-Process -FilePath pi -ArgumentList '\"\" \"two words\" 100% wow! a''b --model' -NoNewWindow -Wait}"
+            "$__herdrAgentCommand=Get-Command pi -ErrorAction SilentlyContinue;if($null -eq $__herdrAgentCommand -or $__herdrAgentCommand.CommandType -ne 'Application'){& pi '' 'two words' '100%' 'wow!' 'a''b' '--model'}else{Start-Process -FilePath $__herdrAgentCommand.Source -ArgumentList '\"\" \"two words\" 100% wow! a''b --model' -NoNewWindow -Wait}"
         );
     }
 
@@ -3600,6 +3599,22 @@ mod tests {
                 "\ntwo words\n100%\nwow!\na'b\n@options\n--model\n"
             );
         }
+
+        let function_capture = base.join("powershell-function.txt");
+        let function_target =
+            super::super::quote_powershell_arg(&base.join("pi.ps1").to_string_lossy());
+        let command = format!(
+            "function global:pi {{ & {function_target} @args }}; {}",
+            super::interactive_shell_command(&argv, "powershell.exe").unwrap()
+        );
+        let status = run_command("powershell.exe", &command, &function_capture);
+        assert!(status.success(), "PowerShell function command failed");
+        assert_eq!(
+            fs::read_to_string(function_capture)
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "\ntwo words\n100%\nwow!\na'b\n@options\n--model\n"
+        );
 
         let _ = fs::remove_dir_all(base);
     }
